@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { color-scheme: light dark; --bg:#fff; --fg:#202124; --muted:#5f6368; --hover:#f1f3f4; --border:#dadce0; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#292a2d; --fg:#e8eaed; --muted:#9aa0a6; --hover:#3c4043; --border:#5f6368; } }
+    body { width: 240px; margin: 0; padding: 8px; font: 13px system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+    button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 10px 12px; margin: 0 0 4px;
+             font: inherit; color: inherit; background: none; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; text-align: left; }
+    button:hover, button:focus-visible { background: var(--hover); outline: none; }
+    button:disabled { opacity: .5; cursor: progress; }
+    kbd { font: 11px ui-monospace, monospace; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+    #status { min-height: 16px; margin: 6px 2px 2px; color: var(--muted); font-size: 12px; }
+    #status.err { color: #d93025; }
+    a { color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <button id="visible">Visible area <kbd>V</kbd></button>
+  <button id="full">Full page <kbd>F</kbd></button>
+  <div id="status"></div>
+  <a href="#" id="shortcuts">Change keyboard shortcuts</a>
+  <script src="popup.js"></script>
+</body>
+</html>
