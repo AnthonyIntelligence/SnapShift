@@ -11,11 +11,11 @@ Firefox-style screenshots for Chrome: capture the visible area or the full page,
 ## Use
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+S` (Mac: `Cmd+Shift+S`) | Open the menu, then press `V` (visible) or `F` (full page) |
+| `Ctrl+Shift+S` (Mac: `Cmd+Shift+S`) | Open the menu, then `Enter` captures the highlighted mode (it remembers your last choice). `↑`/`↓` switch, or press `V` / `F` directly |
 | `Alt+Shift+V` | Capture visible area straight away |
 | `Alt+Shift+F` | Capture full page straight away |
 
-The screenshot opens in a new tab. Drag on it to select an area, then:
+The screenshot opens in a new tab, ready for `Ctrl+C`, so the quickest flow is `Ctrl+Shift+S` → `Enter` → `Ctrl+C`. Optionally drag to select an area first, then:
 - **Copy** (`Ctrl/Cmd+C`) puts it on the clipboard as PNG
 - **Download** (`Ctrl/Cmd+S`) saves it as `<page title> <date time>.png`
 - `Esc` clears the selection

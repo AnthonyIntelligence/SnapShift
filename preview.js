@@ -99,6 +99,7 @@ document.addEventListener('keydown', (e) => {
   $('info').innerHTML = '';
   const b = document.createElement('b');
   b.textContent = shot.title || shot.url;
-  $('info').append(b, ` · ${kind} · ${img.naturalWidth}×${img.naturalHeight} · drag to crop`);
+  $('info').append(b, ` · ${kind} · ${img.naturalWidth}×${img.naturalHeight} · drag to crop · Ctrl+C to copy`);
   $('info').title = shot.url;
+  window.focus();
 })();
