@@ -1,0 +1,11 @@
+{
+  "name": "snapshift",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=120000 test/capture.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.0"
+  }
+}

@@ -12,6 +12,6 @@ SnapShift does not collect, transmit, sell or share any data.
 
 **No network access.** SnapShift makes no network requests, uses no analytics or tracking, and loads no remote code.
 
-**Page access.** SnapShift can only see a tab when you invoke it on that tab (Chrome's `activeTab` permission). For full-page captures it scrolls the page temporarily and puts the scroll position back afterwards. It does not read or change page content otherwise.
+**Page access.** SnapShift can only see a tab when you invoke it on that tab (Chrome's `activeTab` permission). For full-page captures it scrolls the page, temporarily hides or unpins fixed and sticky elements, and restores everything afterwards. It does not read or change page content otherwise.
 
 **Contact.** Questions: open an issue at https://github.com/AnthonyIntelligence/SnapShift/issues.

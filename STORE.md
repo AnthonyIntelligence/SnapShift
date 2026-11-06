@@ -36,7 +36,7 @@ Text to paste into the Developer Dashboard. Not shipped in the extension package
 **Permission justifications:**
 
 - **activeTab:** Gives temporary access to the tab only when the user clicks the toolbar button or uses a SnapShift keyboard shortcut, so the visible area can be captured with `tabs.captureVisibleTab`. No access to any other tab or at any other time.
-- **scripting:** Used only for full-page capture, on the tab the user invoked SnapShift on: injects a small function that reads the page height, scrolls step by step while frames are captured, temporarily hides fixed headers so they don't repeat, then restores the scroll position. It does not read or send page content.
+- **scripting:** Used only for full-page capture, on the tab the user invoked SnapShift on: injects a small function that finds what scrolls, scrolls it step by step while frames are captured, temporarily hides fixed elements and unpins sticky ones so they don't repeat, then restores the page and its scroll position. It does not read or send page content.
 - **clipboardWrite:** Copies the screenshot (or the cropped selection) to the clipboard as a PNG when the user presses Copy or Ctrl+C on the preview tab.
 
 **Remote code:** No, I am not using remote code. All JavaScript is in the package.

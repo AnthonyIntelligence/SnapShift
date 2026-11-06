@@ -7,7 +7,7 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
 $version = (Get-Content manifest.json -Raw | ConvertFrom-Json).version
 $files = @('manifest.json', 'background.js', 'store.js', 'popup.html', 'popup.js', 'preview.html', 'preview.js') +
-  (Get-ChildItem icons -Filter *.png | ForEach-Object { "icons/$($_.Name)" })
+  (Get-ChildItem icons -Filter icon*.png | ForEach-Object { "icons/$($_.Name)" })
 
 New-Item -ItemType Directory dist -Force | Out-Null
 $zipPath = Join-Path $PSScriptRoot "dist/SnapShift-$version.zip"

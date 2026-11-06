@@ -6,6 +6,11 @@ const CAPTURE_GAP_MS = 550;
 const MAX_SIDE = 32000;
 const MAX_AREA = 200_000_000;
 const MAX_FRAMES = 150;
+// Time for the page to react to a scroll (lazy images, sticky state) before capturing.
+const SETTLE_MS = 150;
+// Frames overlap slightly: at fractional display scales scroll positions snap to device
+// pixels, and butting frames together leaves 1px gaps.
+const OVERLAP = 2;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -16,7 +21,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || sender.tab) return;
   if (msg?.type !== 'capture' || !MODES.has(msg.mode) || !Number.isInteger(msg.tabId)) return;
   chrome.tabs.get(msg.tabId).then((tab) => run(msg.mode, tab))
-    .then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: e.message }));
+    .then(() => sendResponse({ ok: true }), (e) => {
+      flashError(e.message); // the popup may already be closed
+      sendResponse({ ok: false, error: e.message });
+    });
   return true; // async response
 });
 
@@ -52,8 +60,8 @@ function checkCapturable(url) {
 }
 
 async function capture(mode, tab) {
-  const blob = mode === 'full' ? await captureFull(tab) : await captureVisible(tab);
-  const id = await putShot({ blob, title: tab.title || '', url: tab.url || '', mode, created: Date.now() });
+  const { blob, note } = mode === 'full' ? await captureFull(tab) : await captureVisible(tab);
+  const id = await putShot({ blob, note, title: tab.title || '', url: tab.url || '', mode, created: Date.now() });
   await chrome.tabs.create({
     url: chrome.runtime.getURL(`preview.html?id=${id}`),
     index: tab.index + 1,
@@ -71,18 +79,29 @@ async function flashError(message) {
   }, 6000);
 }
 
+let lastGrab = 0;
+
 async function grab(windowId) {
+  await sleep(Math.max(0, lastGrab + CAPTURE_GAP_MS - Date.now()));
   try {
     return await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
   } catch (e) {
     throw new Error(`Chrome won't capture this page (${e.message}). Internal pages like chrome:// and the Web Store are blocked.`);
+  } finally {
+    lastGrab = Date.now();
   }
 }
 
 const toBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
 
 async function captureVisible(tab) {
-  return toBlob(await grab(tab.windowId));
+  return { blob: await toBlob(await grab(tab.windowId)) };
+}
+
+// captureVisibleTab takes whatever tab is showing, so never let another one into the image.
+async function checkStillActive(tab) {
+  const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (active?.id !== tab.id) throw new Error('Capture stopped because you switched tabs. Try again and stay on the page.');
 }
 
 async function captureFull(tab) {
@@ -95,37 +114,52 @@ async function captureFull(tab) {
   }
 
   try {
-    const positions = [];
-    for (let y = 0; y < m.height && positions.length < MAX_FRAMES; y += m.viewH) positions.push(y);
-
-    let canvas, ctx, outScale, ratio;
-    let last = 0;
-    for (let i = 0; i < positions.length; i++) {
+    // Scroll until the page stops moving, so content added along the way is included.
+    const frames = [];
+    const notes = m.panel ? ['Scrolling panel only'] : [];
+    for (let y = 0; ;) {
       const [{ result: actualY }] = await chrome.scripting.executeScript({
-        target, func: scrollToY, args: [positions[i], i > 0],
+        target, func: scrollToY, args: [y, frames.length === 0],
       });
-      await sleep(Math.max(150, last + CAPTURE_GAP_MS - Date.now()));
-      const dataUrl = await grab(tab.windowId);
-      last = Date.now();
-      const bmp = await createImageBitmap(await toBlob(dataUrl));
-
-      if (!canvas) {
-        const px = bmp.width / m.viewW; // device pixels per CSS pixel (DPI + zoom)
-        outScale = px;
-        const w = m.viewW * px, h = m.height * px;
-        const shrink = Math.min(1, MAX_SIDE / h, MAX_SIDE / w, Math.sqrt(MAX_AREA / (w * h)));
-        outScale = px * shrink;
-        ratio = shrink;
-        canvas = new OffscreenCanvas(Math.round(m.viewW * outScale), Math.round(m.height * outScale));
-        ctx = canvas.getContext('2d');
+      if (frames.length && actualY <= frames.at(-1).y) break;
+      if (frames.length === MAX_FRAMES) {
+        notes.push(`Stopped after ${MAX_FRAMES} screens`);
+        break;
       }
-      ctx.drawImage(bmp, 0, Math.round(actualY * outScale), Math.round(bmp.width * ratio), Math.round(bmp.height * ratio));
-      bmp.close();
+      await sleep(SETTLE_MS);
+      await checkStillActive(tab);
+      frames.push({ y: actualY, blob: await toBlob(await grab(tab.windowId)) });
+      y = actualY + m.crop.h - OVERLAP;
     }
-    return await canvas.convertToBlob({ type: 'image/png' });
+    return await stitch(frames, m, notes);
   } finally {
     await chrome.scripting.executeScript({ target, func: restorePage }).catch(() => {});
   }
+}
+
+async function stitch(frames, m, notes) {
+  const { crop } = m;
+  const first = await createImageBitmap(frames[0].blob);
+  const px = first.width / m.viewW; // device pixels per CSS pixel (DPI + zoom)
+  // Fractional scales can make the crop a fraction bigger than the bitmap really is.
+  const srcW = Math.min(crop.w * px, first.width - crop.x * px);
+  const srcH = Math.min(crop.h * px, first.height - crop.y * px);
+  first.close();
+  const w = srcW, h = frames.at(-1).y * px + srcH;
+  const shrink = Math.min(1, MAX_SIDE / h, MAX_SIDE / w, Math.sqrt(MAX_AREA / (w * h)));
+  if (shrink < 1) notes.push('Scaled down to fit');
+  const outScale = px * shrink;
+  const outW = Math.round(srcW * shrink), outH = Math.round(srcH * shrink);
+  const canvas = new OffscreenCanvas(outW, Math.round(frames.at(-1).y * outScale) + outH);
+  const ctx = canvas.getContext('2d');
+  // Last frame first: it can overlap the one before it, and only the first frame has the header.
+  for (const f of frames.reverse()) {
+    const bmp = await createImageBitmap(f.blob);
+    ctx.drawImage(bmp, crop.x * px, crop.y * px, srcW, srcH,
+      0, Math.round(f.y * outScale), outW, outH);
+    bmp.close();
+  }
+  return { blob: await canvas.convertToBlob({ type: 'image/png' }), note: notes.join(' · ') };
 }
 
 // ---- Functions injected into the page (must be self-contained) ----
@@ -137,38 +171,69 @@ function preparePage() {
     'html{scroll-behavior:auto!important;scrollbar-width:none!important}' +
     '::-webkit-scrollbar{display:none!important}';
   document.documentElement.appendChild(style);
-  window.__qsState = { x: window.scrollX, y: window.scrollY, hidden: [], fixedHidden: false };
-  const de = document.documentElement, b = document.body;
-  const height = Math.max(de.scrollHeight, de.offsetHeight, de.clientHeight, b ? b.scrollHeight : 0, b ? b.offsetHeight : 0);
-  return { height, viewW: window.innerWidth, viewH: window.innerHeight };
-}
+  const x = window.scrollX, y = window.scrollY;
+  const viewW = window.innerWidth, viewH = window.innerHeight;
 
-async function scrollToY(y, hideFixed) {
-  const st = window.__qsState;
-  // After the first frame, hide fixed/sticky headers so they don't repeat down the image.
-  if (hideFixed && !st.fixedHidden) {
-    st.fixedHidden = true;
-    for (const el of document.querySelectorAll('body *')) {
-      const pos = getComputedStyle(el).position;
-      if (pos === 'fixed' || pos === 'sticky') {
-        st.hidden.push([el, el.style.getPropertyValue('visibility'), el.style.getPropertyPriority('visibility')]);
-        el.style.setProperty('visibility', 'hidden', 'important');
-      }
+  // Apps that scroll an inner panel don't move the window, so capture the biggest panel instead.
+  window.scrollTo({ top: 1e9, left: 0, behavior: 'instant' });
+  const windowScrolls = window.scrollY > viewH * 0.05;
+  window.scrollTo({ top: y, left: x, behavior: 'instant' });
+  let scroller = null, area = viewW * viewH * 0.25;
+  if (!windowScrolls && document.body) {
+    for (const el of [document.body, ...document.body.querySelectorAll('*')]) {
+      if (el.scrollHeight <= el.clientHeight + 1 || el.clientWidth * el.clientHeight <= area) continue;
+      if (!['auto', 'scroll'].includes(getComputedStyle(el).overflowY)) continue;
+      scroller = el;
+      area = el.clientWidth * el.clientHeight;
     }
   }
-  window.scrollTo({ top: y, left: 0, behavior: 'instant' });
+
+  window.__qsState = { x, y, undo: [], seen: new Set(), scroller, panelY: scroller?.scrollTop };
+  if (!scroller) return { viewW, crop: { x: 0, y: 0, w: viewW, h: viewH } };
+  const r = scroller.getBoundingClientRect();
+  return {
+    viewW, panel: true,
+    crop: { x: r.left + scroller.clientLeft, y: r.top + scroller.clientTop, w: scroller.clientWidth, h: scroller.clientHeight },
+  };
+}
+
+async function scrollToY(y, firstFrame) {
+  const st = window.__qsState, sc = st.scroller;
+  (sc || window).scrollTo({ top: y, left: 0, behavior: 'instant' });
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  return window.scrollY;
+
+  const set = (el, prop, value) => {
+    st.undo.push([el, prop, el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)]);
+    el.style.setProperty(prop, value, 'important');
+  };
+  // Checked on every frame, after scrolling: many headers only become fixed once the page moves.
+  for (const el of document.querySelectorAll('body *')) {
+    if (st.seen.has(el)) continue;
+    const pos = getComputedStyle(el).position;
+    if (pos === 'sticky') {
+      // Sticky elements go back to their place in the page, so they appear once, where they belong.
+      st.seen.add(el);
+      set(el, 'position', 'relative');
+      for (const side of ['top', 'right', 'bottom', 'left']) set(el, side, 'auto');
+    } else if (pos === 'fixed' && !el.contains(sc)) {
+      // The first frame keeps headers and side navs, but not cookie bars and chat bubbles.
+      if (firstFrame && !sc && el.getBoundingClientRect().top < window.innerHeight / 3) continue;
+      st.seen.add(el);
+      set(el, 'visibility', 'hidden');
+    }
+  }
+  return sc ? sc.scrollTop : window.scrollY;
 }
 
 function restorePage() {
   document.getElementById('__qs_style')?.remove();
   const st = window.__qsState;
   if (!st) return;
-  for (const [el, value, priority] of st.hidden) {
-    if (value) el.style.setProperty('visibility', value, priority);
-    else el.style.removeProperty('visibility');
+  for (const [el, prop, value, priority] of st.undo.reverse()) {
+    if (value) el.style.setProperty(prop, value, priority);
+    else el.style.removeProperty(prop);
   }
+  st.scroller?.scrollTo({ top: st.panelY, left: 0, behavior: 'instant' });
   window.scrollTo({ top: st.y, left: st.x, behavior: 'instant' });
   delete window.__qsState;
 }

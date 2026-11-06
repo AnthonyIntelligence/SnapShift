@@ -26,7 +26,7 @@ async function outputBlob() {
   c.width = Math.round(sel.w * k);
   c.height = Math.round(sel.h * k);
   c.getContext('2d').drawImage(img, sel.x * k, sel.y * k, c.width, c.height, 0, 0, c.width, c.height);
-  return new Promise((r) => c.toBlob(r, 'image/png'));
+  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('selection is too large'))), 'image/png'));
 }
 
 async function copy() {
@@ -40,10 +40,14 @@ async function copy() {
 }
 
 async function download() {
-  const url = URL.createObjectURL(await outputBlob());
-  const a = Object.assign(document.createElement('a'), { href: url, download: fileName() });
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  try {
+    const url = URL.createObjectURL(await outputBlob());
+    const a = Object.assign(document.createElement('a'), { href: url, download: fileName() });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (e) {
+    toast(`Download failed: ${e.message}`);
+  }
 }
 
 function drawSel() {
@@ -99,7 +103,8 @@ document.addEventListener('keydown', (e) => {
   $('info').replaceChildren();
   const b = document.createElement('b');
   b.textContent = shot.title || shot.url;
-  $('info').append(b, ` · ${kind} · ${img.naturalWidth}×${img.naturalHeight} · drag to crop · Ctrl+C to copy`);
+  const note = shot.note ? ` · ${shot.note}` : '';
+  $('info').append(b, ` · ${kind}${note} · ${img.naturalWidth}×${img.naturalHeight} · drag to crop · ${mac ? 'Cmd' : 'Ctrl'}+C to copy`);
   $('info').title = shot.url;
   window.focus();
 })();
