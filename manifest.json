@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "SnapShift",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Capture the visible area or the full page, then crop, copy or save it.",
+  "minimum_chrome_version": "116",
+  "homepage_url": "https://github.com/AnthonyIntelligence/SnapShift",
   "permissions": ["activeTab", "scripting", "clipboardWrite"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {

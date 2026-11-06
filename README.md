@@ -3,7 +3,7 @@
 Firefox-style screenshots for Chrome: capture the visible area or the full page, drag to crop, then copy or download.
 
 ## Install
-1. Unzip this folder.
+1. Download or clone this repository.
 2. Open `chrome://extensions`, turn on **Developer mode**.
 3. Click **Load unpacked** and pick the `SnapShift` folder.
 4. Pin the extension (puzzle icon → pin) if you want the toolbar button.
@@ -30,3 +30,9 @@ Change shortcuts at `chrome://extensions/shortcuts`. If another extension alread
 
 ## Permissions
 `activeTab` (only the tab you trigger it on, only when you trigger it), `scripting` (scroll the page for full-page capture), `clipboardWrite`. No host permissions, no network access.
+
+## Privacy
+SnapShift makes no network requests and collects nothing. See [PRIVACY.md](PRIVACY.md).
+
+## Publishing
+Run `powershell -File pack.ps1` to build `dist/SnapShift-<version>.zip` for the Chrome Web Store. Listing text and permission justifications are in [STORE.md](STORE.md).

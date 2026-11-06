@@ -20,7 +20,10 @@ async function capture(mode) {
   buttons.forEach((b) => (b.disabled = true));
   status.className = 'busy';
   status.textContent = mode === 'full' ? 'Capturing full page… keep this tab open.' : 'Capturing…';
-  const res = await chrome.runtime.sendMessage({ type: 'capture', mode });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const res = tab
+    ? await chrome.runtime.sendMessage({ type: 'capture', mode, tabId: tab.id }).catch((e) => ({ ok: false, error: e.message }))
+    : { ok: false, error: 'No active tab.' };
   if (res?.ok) return window.close();
   busy = false;
   status.className = 'err';

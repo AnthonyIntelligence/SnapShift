@@ -90,13 +90,13 @@ document.addEventListener('keydown', (e) => {
 
 (async () => {
   const id = new URLSearchParams(location.search).get('id');
-  shot = id && (await getShot(id));
+  shot = /^[0-9a-f-]{36}$/i.test(id || '') ? await getShot(id).catch(() => null) : null;
   if (!shot) { $('info').textContent = 'This screenshot is no longer available.'; return; }
   img.src = URL.createObjectURL(shot.blob);
   await img.decode();
   document.title = `Screenshot – ${shot.title || shot.url}`;
   const kind = shot.mode === 'full' ? 'Full page' : 'Visible area';
-  $('info').innerHTML = '';
+  $('info').replaceChildren();
   const b = document.createElement('b');
   b.textContent = shot.title || shot.url;
   $('info').append(b, ` · ${kind} · ${img.naturalWidth}×${img.naturalHeight} · drag to crop · Ctrl+C to copy`);

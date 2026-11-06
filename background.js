@@ -9,9 +9,13 @@ const MAX_FRAMES = 150;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type !== 'capture') return;
-  chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => run(msg.mode, tab))
+const MODES = new Set(['visible', 'full']);
+
+// Only accept requests from this extension's own pages (the popup).
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || sender.tab) return;
+  if (msg?.type !== 'capture' || !MODES.has(msg.mode) || !Number.isInteger(msg.tabId)) return;
+  chrome.tabs.get(msg.tabId).then((tab) => run(msg.mode, tab))
     .then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: e.message }));
   return true; // async response
 });
@@ -22,8 +26,32 @@ chrome.commands.onCommand.addListener((command, tab) => {
   run(mode, tab).catch((e) => flashError(e.message));
 });
 
+let running = false;
+
 async function run(mode, tab) {
-  if (!tab) throw new Error('No active tab.');
+  if (!tab?.id) throw new Error('No active tab.');
+  if (running) throw new Error('A capture is already in progress.');
+  checkCapturable(tab.url);
+  running = true;
+  try {
+    await capture(mode, tab);
+  } finally {
+    running = false;
+  }
+}
+
+// Fail fast with a clear message on pages Chrome never lets extensions capture.
+function checkCapturable(url) {
+  if (!url) return; // URL is hidden until activeTab is granted; let Chrome decide.
+  const u = new URL(url);
+  const blockedHost = u.hostname === 'chromewebstore.google.com' ||
+    (u.hostname === 'chrome.google.com' && u.pathname.startsWith('/webstore'));
+  if (!['http:', 'https:', 'file:', 'data:'].includes(u.protocol) || blockedHost) {
+    throw new Error("Chrome doesn't allow screenshots of this page (browser and Web Store pages are protected).");
+  }
+}
+
+async function capture(mode, tab) {
   const blob = mode === 'full' ? await captureFull(tab) : await captureVisible(tab);
   const id = await putShot({ blob, title: tab.title || '', url: tab.url || '', mode, created: Date.now() });
   await chrome.tabs.create({
