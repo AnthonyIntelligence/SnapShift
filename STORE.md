@@ -6,7 +6,7 @@ Text to paste into the Developer Dashboard. Not shipped in the extension package
 
 **Name:** SnapShift
 
-**Summary (max 132 chars):** Capture the visible area or the full page, then crop, copy or save it.
+**Summary (max 132 chars):** Capture the visible area, a selected area or the full page, then copy or save it.
 
 **Category:** Tools (Productivity)
 
@@ -18,8 +18,9 @@ Text to paste into the Developer Dashboard. Not shipped in the extension package
 >
 > • Visible area: exactly what's on screen
 > • Full page: scrolls and stitches the whole page into one image
+> • Select area: drag on the page to capture just that part
 > • Crop by dragging, copy as PNG, or download with the page title and time as the file name
-> • Keyboard-first: arrows to switch mode, V or F to capture directly, Alt+Shift+V / Alt+Shift+F to skip the menu
+> • Keyboard-first: arrows to switch mode, V, F or S to capture directly, Alt+Shift+V / F / S to skip the menu
 > • Remembers your last mode
 > • Light and dark theme
 >
@@ -31,12 +32,12 @@ Text to paste into the Developer Dashboard. Not shipped in the extension package
 
 ## Privacy practices tab
 
-**Single purpose:** Take screenshots of the current tab (visible area or full page) and let the user crop, copy or download them.
+**Single purpose:** Take screenshots of the current tab (visible area, selected area or full page) and let the user crop, copy or download them.
 
 **Permission justifications:**
 
 - **activeTab:** Gives temporary access to the tab only when the user clicks the toolbar button or uses a SnapShift keyboard shortcut, so the visible area can be captured with `tabs.captureVisibleTab`. No access to any other tab or at any other time.
-- **scripting:** Used only for full-page capture, on the tab the user invoked SnapShift on: injects a small function that finds what scrolls, scrolls it step by step while frames are captured, temporarily hides fixed elements and unpins sticky ones so they don't repeat, then restores the page and its scroll position. It does not read or send page content.
+- **scripting:** Used only on the tab the user invoked SnapShift on. For Select area it shows an overlay so the user can drag out a region, and removes it afterwards. For full-page capture it injects a small function that finds what scrolls, scrolls it step by step while frames are captured, temporarily hides fixed elements and unpins sticky ones so they don't repeat, then restores the page and its scroll position. It does not read or send page content.
 - **clipboardWrite:** Copies the screenshot (or the cropped selection) to the clipboard as a PNG when the user presses Copy or Ctrl+C on the preview tab.
 
 **Remote code:** No, I am not using remote code. All JavaScript is in the package.

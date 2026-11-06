@@ -99,7 +99,7 @@ document.addEventListener('keydown', (e) => {
   img.src = URL.createObjectURL(shot.blob);
   await img.decode();
   document.title = `Screenshot – ${shot.title || shot.url}`;
-  const kind = shot.mode === 'full' ? 'Full page' : 'Visible area';
+  const kind = { full: 'Full page', select: 'Selection' }[shot.mode] || 'Visible area';
   $('info').replaceChildren();
   const b = document.createElement('b');
   b.textContent = shot.title || shot.url;

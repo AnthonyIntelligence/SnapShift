@@ -14,13 +14,15 @@ const OVERLAP = 2;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const MODES = new Set(['visible', 'full']);
+const MODES = new Set(['visible', 'full', 'select']);
+const COMMANDS = { 'capture-visible': 'visible', 'capture-full': 'full', 'capture-select': 'select' };
 
 // Only accept requests from this extension's own pages (the popup).
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || sender.tab) return;
   if (msg?.type !== 'capture' || !MODES.has(msg.mode) || !Number.isInteger(msg.tabId)) return;
-  chrome.tabs.get(msg.tabId).then((tab) => run(msg.mode, tab))
+  // Selecting happens on the page, so the popup is told to close as soon as the overlay is up.
+  chrome.tabs.get(msg.tabId).then((tab) => run(msg.mode, tab, () => sendResponse({ ok: true })))
     .then(() => sendResponse({ ok: true }), (e) => {
       flashError(e.message); // the popup may already be closed
       sendResponse({ ok: false, error: e.message });
@@ -29,20 +31,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 chrome.commands.onCommand.addListener((command, tab) => {
-  const mode = command === 'capture-full' ? 'full' : command === 'capture-visible' ? 'visible' : null;
+  const mode = COMMANDS[command];
   if (!mode) return;
   run(mode, tab).catch((e) => flashError(e.message));
 });
 
 let running = false;
 
-async function run(mode, tab) {
+async function run(mode, tab, onReady) {
   if (!tab?.id) throw new Error('No active tab.');
   if (running) throw new Error('A capture is already in progress.');
   checkCapturable(tab.url);
   running = true;
   try {
-    await capture(mode, tab);
+    await capture(mode, tab, onReady);
   } finally {
     running = false;
   }
@@ -59,8 +61,12 @@ function checkCapturable(url) {
   }
 }
 
-async function capture(mode, tab) {
-  const { blob, note } = mode === 'full' ? await captureFull(tab) : await captureVisible(tab);
+async function capture(mode, tab, onReady) {
+  const shot = mode === 'full' ? await captureFull(tab)
+    : mode === 'select' ? await captureSelect(tab, onReady)
+    : await captureVisible(tab);
+  if (!shot) return; // selection cancelled
+  const { blob, note } = shot;
   const id = await putShot({ blob, note, title: tab.title || '', url: tab.url || '', mode, created: Date.now() });
   await chrome.tabs.create({
     url: chrome.runtime.getURL(`preview.html?id=${id}`),
@@ -96,6 +102,43 @@ const toBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
 
 async function captureVisible(tab) {
   return { blob: await toBlob(await grab(tab.windowId)) };
+}
+
+async function captureSelect(tab, onReady) {
+  const target = { tabId: tab.id };
+  try {
+    await chrome.scripting.executeScript({ target, func: showPicker });
+  } catch (e) {
+    throw new Error(`Can't access this page to select an area (${e.message}).`);
+  }
+  onReady?.();
+
+  // The user can take their time, so keep the service worker from going idle meanwhile.
+  const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);
+  // Leaving the tab cancels, otherwise the overlay would block captures on every other tab.
+  const onSwitch = (info) => {
+    if (info.windowId !== tab.windowId || info.tabId === tab.id) return;
+    chrome.scripting.executeScript({ target, func: cancelPick }).catch(() => {});
+  };
+  chrome.tabs.onActivated.addListener(onSwitch);
+  let picked;
+  try {
+    // Navigating away ends the script without a result, which counts as cancelling.
+    [picked] = await chrome.scripting.executeScript({ target, func: waitForPick }).catch(() => []);
+  } finally {
+    clearInterval(keepAlive);
+    chrome.tabs.onActivated.removeListener(onSwitch);
+  }
+  const rect = picked?.result;
+  if (!rect) return null;
+
+  await checkStillActive(tab);
+  const bmp = await createImageBitmap(await toBlob(await grab(tab.windowId)));
+  const px = bmp.width / rect.viewW; // device pixels per CSS pixel (DPI + zoom)
+  const canvas = new OffscreenCanvas(Math.round(rect.w * px), Math.round(rect.h * px));
+  canvas.getContext('2d').drawImage(bmp, rect.x * px, rect.y * px, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  return { blob: await canvas.convertToBlob({ type: 'image/png' }) };
 }
 
 // captureVisibleTab takes whatever tab is showing, so never let another one into the image.
@@ -163,6 +206,77 @@ async function stitch(frames, m, notes) {
 }
 
 // ---- Functions injected into the page (must be self-contained) ----
+
+function showPicker() {
+  const root = document.createElement('div');
+  root.id = '__qs_pick';
+  root.style.cssText = 'all:initial!important;position:fixed!important;inset:0!important;z-index:2147483647!important;' +
+    'overflow:hidden!important;cursor:crosshair!important;background:rgba(0,0,0,.35)!important';
+  // A shadow root keeps the page's CSS away from the box and the hint.
+  const shadow = root.attachShadow({ mode: 'closed' });
+  const box = document.createElement('div');
+  box.style.cssText = 'position:absolute;display:none;box-sizing:border-box;border:1.5px dashed #fff;' +
+    'outline:1px solid rgba(0,0,0,.6);box-shadow:0 0 0 9999px rgba(0,0,0,.45)';
+  const hint = document.createElement('div');
+  hint.textContent = 'Drag to select an area · Esc to cancel';
+  hint.style.cssText = 'position:absolute;top:16px;left:50%;transform:translateX(-50%);padding:8px 14px;border-radius:6px;' +
+    'background:#323232;color:#fff;font:13px system-ui,sans-serif;white-space:nowrap;pointer-events:none';
+  shadow.append(box, hint);
+
+  window.__qsPick = new Promise((resolve) => {
+    const finish = async (rect) => {
+      window.removeEventListener('keydown', onKey, true);
+      root.remove();
+      delete window.__qsPick;
+      delete window.__qsCancel;
+      // Let the overlay leave the screen before the capture.
+      if (rect) await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      resolve(rect);
+    };
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      finish(null);
+    };
+    window.__qsCancel = () => finish(null);
+    window.addEventListener('keydown', onKey, true);
+
+    root.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const clamp = (v, max) => Math.max(0, Math.min(max, v));
+      const x0 = e.clientX, y0 = e.clientY;
+      let sel = null;
+      root.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const x1 = clamp(ev.clientX, root.clientWidth), y1 = clamp(ev.clientY, root.clientHeight);
+        sel = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+        root.style.setProperty('background', 'transparent', 'important');
+        hint.style.display = 'none';
+        Object.assign(box.style, { display: 'block', left: `${sel.x}px`, top: `${sel.y}px`, width: `${sel.w}px`, height: `${sel.h}px` });
+      };
+      root.addEventListener('pointermove', move);
+      root.addEventListener('pointerup', () => {
+        root.removeEventListener('pointermove', move);
+        if (sel && sel.w >= 4 && sel.h >= 4) return finish({ ...sel, viewW: window.innerWidth });
+        // A click or a tiny drag: stay open and let the user try again.
+        box.style.display = 'none';
+        hint.style.display = '';
+        root.style.setProperty('background', 'rgba(0,0,0,.35)', 'important');
+      }, { once: true });
+    });
+  });
+  document.documentElement.appendChild(root);
+}
+
+function waitForPick() {
+  return window.__qsPick;
+}
+
+function cancelPick() {
+  window.__qsCancel?.();
+}
 
 function preparePage() {
   const style = document.createElement('style');

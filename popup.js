@@ -42,7 +42,7 @@ document.getElementById('shortcuts').onclick = (e) => {
 };
 
 // Ctrl+Shift+S opens this popup. Enter captures the highlighted option,
-// arrows move the highlight, V or F capture that mode directly.
+// arrows move the highlight, V, F or S capture that mode directly.
 document.addEventListener('keydown', (e) => {
   if (busy || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
@@ -52,6 +52,7 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'arrowup' || (k === 'tab' && e.shiftKey)) highlight(current - 1);
   else if (k === 'v') capture('visible');
   else if (k === 'f') capture('full');
+  else if (k === 's') capture('select');
   else handled = false;
   if (handled) e.preventDefault();
 });

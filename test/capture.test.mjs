@@ -98,7 +98,13 @@ async function shoot(name, { mode = 'full', maxFrames, x = 0.5, prep } = {}) {
   const page = await open(name);
   if (prep) await prep(page);
   const [preview] = await Promise.all([ctx.waitForEvent('page'), startCapture(page, mode, maxFrames)]);
-  const result = await preview.evaluate(async (x) => {
+  const result = await readShot(preview, x);
+  await preview.close();
+  return { ...result, page };
+}
+
+function readShot(preview, x) {
+  return preview.evaluate(async (x) => {
     const img = document.getElementById('img');
     while (!img.naturalWidth) await new Promise((r) => setTimeout(r, 20));
     const c = document.createElement('canvas');
@@ -117,8 +123,6 @@ async function shoot(name, { mode = 'full', maxFrames, x = 0.5, prep } = {}) {
     await new Promise((r) => setTimeout(r, 50));
     return { width: c.width, height: c.height, runs, info: document.getElementById('info').textContent };
   }, x);
-  await preview.close();
-  return { ...result, page };
 }
 
 const colors = (shot) => {
@@ -227,6 +231,97 @@ test('two captures in quick succession both work', async () => {
   assert.deepEqual(colors(second), colors(first));
   await first.page.close();
   await second.page.close();
+});
+
+async function picker(name) {
+  const page = await open(name);
+  const done = startCapture(page, 'select');
+  await page.waitForSelector('#__qs_pick', { state: 'attached' });
+  return { page, done };
+}
+
+async function drag(page, x0, y0, x1, y1) {
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  await page.mouse.move(x1, y1, { steps: 4 });
+  await page.mouse.up();
+}
+
+const pickerGone = (page) => page.waitForSelector('#__qs_pick', { state: 'detached' });
+
+test('select area captures just the dragged region, without the overlay', async () => {
+  const { page, done } = await picker('split.html');
+  const previewOpened = ctx.waitForEvent('page');
+  await drag(page, 100, 250, 300, 350);
+  const [preview] = await Promise.all([previewOpened, done]);
+  const shot = await readShot(preview, 0.5);
+  assert.deepEqual(colors(shot), [RED, GREEN]);
+  assert.ok(Math.abs(shot.width - 200 * scale) <= 2, `width ${shot.width}`);
+  assert.ok(Math.abs(shot.height - 100 * scale) <= 2, `height ${shot.height}`);
+  assert.ok(Math.abs(shot.runs[0].height - 50 * scale) <= 2, JSON.stringify(shot.runs));
+  assert.match(shot.info, /Selection/);
+  await pickerGone(page);
+  await preview.close();
+  await page.close();
+});
+
+test('a click leaves the overlay open for another try', async () => {
+  const { page, done } = await picker('split.html');
+  await page.mouse.click(200, 200);
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(await page.locator('#__qs_pick').count(), 1);
+  await page.keyboard.press('Escape');
+  await done;
+  await page.close();
+});
+
+test('Esc cancels: no preview, and the next capture still works', async () => {
+  const before = ctx.pages().length;
+  const { page, done } = await picker('split.html');
+  await page.keyboard.press('Escape');
+  await done;
+  await pickerGone(page);
+  assert.equal(ctx.pages().length, before + 1);
+  await page.close();
+  const shot = await shoot('short.html', { mode: 'visible' });
+  assert.deepEqual(colors(shot), [GREEN, WHITE]);
+  await shot.page.close();
+});
+
+test('switching tabs cancels a selection', async () => {
+  const other = await open('short.html');
+  const { page, done } = await picker('split.html');
+  await other.bringToFront();
+  await done;
+  await page.bringToFront();
+  await pickerGone(page);
+  await other.close();
+  await page.close();
+});
+
+test('navigating away cancels a selection', async () => {
+  const { page, done } = await picker('split.html');
+  await page.goto(`${origin}/short.html`);
+  await done;
+  await page.close();
+});
+
+test('the menu is told to close as soon as the overlay is up', async () => {
+  const page = await open('split.html');
+  const menu = await ctx.newPage();
+  await menu.goto(`chrome-extension://${new URL(sw.url()).host}/popup.html`);
+  const url = page.url();
+  const res = await menu.evaluate(async (url) => {
+    const tab = (await chrome.tabs.query({})).find((t) => t.url === url);
+    await chrome.tabs.update(tab.id, { active: true });
+    return chrome.runtime.sendMessage({ type: 'capture', mode: 'select', tabId: tab.id });
+  }, url);
+  assert.equal(res.ok, true);
+  await page.bringToFront();
+  await page.keyboard.press('Escape');
+  await pickerGone(page);
+  await menu.close();
+  await page.close();
 });
 
 test('switching tabs stops the capture instead of grabbing the other tab', async () => {
