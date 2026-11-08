@@ -29,11 +29,28 @@ async function outputBlob() {
   return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('selection is too large'))), 'image/png'));
 }
 
+// Remembered per browser profile. localStorage is shared by every page of the extension.
+const AUTOCLOSE_KEY = 'autoClose';
+function autoClose() {
+  try { return localStorage.getItem(AUTOCLOSE_KEY) === '1'; } catch { return false; }
+}
+
+function closeTab() {
+  chrome.tabs.getCurrent((t) => (t ? chrome.tabs.remove(t.id) : window.close()));
+}
+
+// Called only after a copy or download succeeded. The short wait lets the toast
+// show and gives Chrome time to take over the download before the page goes away.
+function closeIfWanted(delay) {
+  if (autoClose()) setTimeout(closeTab, delay);
+}
+
 async function copy() {
   try {
     const blob = await outputBlob();
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     toast(sel ? 'Selection copied' : 'Copied to clipboard');
+    closeIfWanted(600);
   } catch (e) {
     toast(`Copy failed: ${e.message}`);
   }
@@ -45,6 +62,7 @@ async function download() {
     const a = Object.assign(document.createElement('a'), { href: url, download: fileName() });
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+    closeIfWanted(1000);
   } catch (e) {
     toast(`Download failed: ${e.message}`);
   }
@@ -81,6 +99,11 @@ wrap.addEventListener('pointerdown', (e) => {
 
 $('copy').onclick = copy;
 $('download').onclick = download;
+$('close').onclick = closeTab;
+$('autoclose').checked = autoClose();
+$('autoclose').onchange = (e) => {
+  try { localStorage.setItem(AUTOCLOSE_KEY, e.target.checked ? '1' : '0'); } catch {}
+};
 $('clear').onclick = () => { sel = null; drawSel(); };
 window.addEventListener('resize', () => { sel = null; drawSel(); });
 
