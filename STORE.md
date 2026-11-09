@@ -46,7 +46,7 @@ Text to paste into the Developer Dashboard. Not shipped in the extension package
 
 Certify all three disclosures (no selling, no unrelated use, no creditworthiness use).
 
-**Privacy policy URL:** https://github.com/AnthonyIntelligence/SnapShift/blob/main/PRIVACY.md
+**Privacy policy URL:** https://gist.github.com/BigBaws/b36bc19d10f9d0b92f634224c2de3b0a (public gist of PRIVACY.md; update it with `gh gist edit b36bc19d10f9d0b92f634224c2de3b0a PRIVACY.md` whenever PRIVACY.md changes)
 
 ## Before each upload
 
